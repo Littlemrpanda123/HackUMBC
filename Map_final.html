@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>World Map — 2/5 Map (Left, Centered) + 3/5 Info (Right) with Culture</title>
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0e1527; --ink:#e5e7eb; --muted:#9aa5b1; --outline:#1f2937; --tooltip:#0f172a;
+      --na:#60a5fa; --sa:#f59e0b; --eu:#a78bfa; --af:#22c55e; --as:#f87171; --oc:#38bdf8; --an:#94a3b8;
+      --accent:#60a5fa;
+    }
+    html,body{height:100%}
+    body{
+      margin:0;display:grid;place-items:center;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--ink);
+      background:radial-gradient(1000px 600px at 70% 30%,#0f1a35 0%,var(--bg) 60%)
+    }
+    .wrap{width:min(1200px,96vw);padding:20px;display:grid;gap:14px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02));border:1px solid var(--outline);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+    .header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;gap:10px;flex-wrap:wrap}
+    .header h1{font-size:18px;margin:0;white-space:nowrap}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{background:#0c1426;border:1px solid var(--outline);color:var(--ink);border-radius:10px;padding:8px 10px;cursor:pointer}
+    .btn-ghost{background:transparent;border:1px dashed var(--outline)}
+    .search{display:flex;gap:6px;align-items:center}
+    .search input{
+      background:#0c1426;border:1px solid var(--outline);color:var(--ink);
+      border-radius:10px;padding:8px 10px;min-width:240px;outline:none
+    }
+    .search input::placeholder{color:var(--muted)}
+    .search .hint{font-size:11px;color:var(--muted)}
+
+    /* Layout: map (2/5) + info (3/5) */
+    .shell{ display:grid; grid-template-columns:2fr 3fr; gap:12px; align-items:stretch;
+            border-top:1px solid var(--outline); border-radius:0 0 16px 16px; overflow:hidden;
+            transition:grid-template-columns .25s ease; }
+    .shell.collapsed{ grid-template-columns:1fr 0px; } /* hide info panel when collapsed */
+
+    .map-shell{position:relative;height:min(64vh,560px)}
+    svg#map{width:100%;height:100%}
+
+    .map-shell path{shape-rendering:crispEdges;vector-effect:non-scaling-stroke;stroke-linejoin:bevel;stroke-linecap:butt}
+    .countries .country{stroke:#0b1220;stroke-width:.7;cursor:pointer}
+    .countries .country:hover{filter:brightness(1.07)}
+    .borders{pointer-events:none}
+    .borders path{fill:none;stroke:#0b1220;stroke-width:.7}
+    .coast path{fill:none;stroke:#0a0f1f;stroke-width:.8;opacity:.7}
+
+    .dimmed{opacity:.25}
+    .continent-dim{opacity:.18;filter:saturate(0.25) brightness(0.8)}
+    .popped{filter:drop-shadow(0 6px 16px rgba(0,0,0,.6));stroke:#0b1220;stroke-width:1.2}
+
+    .tooltip{position:fixed;pointer-events:none;transform:translate(10px,10px);background:var(--tooltip);color:var(--ink);border:1px solid var(--outline);border-radius:8px;padding:6px 8px;font-size:12px;box-shadow:0 6px 16px rgba(0,0,0,.35);opacity:0;transition:opacity .1s ease}
+    .tooltip.show{opacity:1}
+
+    .info{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border-left:1px solid var(--outline);padding:14px;display:grid;align-content:start;gap:10px;font-size:14px;line-height:1.4}
+    .info.hidden{display:none}
+    .badge{display:inline-grid;grid-auto-flow:column;gap:4px;align-items:center;border:1px solid var(--outline);border-radius:999px;padding:4px 8px;font-size:12px}
+    .k{color:var(--muted);font-size:11px}
+    .v{font-weight:600}
+    .big{font-size:18px;line-height:1.2;margin:0}
+    .muted{color:var(--muted);font-size:12px}
+    .note{font-size:11px;color:var(--muted);padding:8px 10px 10px}
+
+    /* New UI for cultural detail */
+    .section{border-top:1px dashed var(--outline); padding-top:10px; margin-top:6px}
+    .section h3{margin:0 0 6px;font-size:13px;color:var(--ink);opacity:.9;letter-spacing:.2px}
+    .skeleton{background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,.02),rgba(255,255,255,.06));background-size:200% 100%;animation:shimmer 1.2s linear infinite;border-radius:6px;height:12px;margin:6px 0}
+    .skeleton.lg{height:32px}
+    @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    .small{font-size:12px;color:var(--muted)}
+    .link{color:var(--accent); text-decoration:none}
+    .link:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <h1 id="title">World — Click a country to zoom into its continent</h1>
+        <div class="toolbar">
+          <div class="search">
+            <input id="searchInput" list="countryList" placeholder="Search country (name or ISO3)…" />
+            <datalist id="countryList"></datalist>
+            <button id="searchBtn" class="btn">Search</button>
+            <span class="hint">Enter to search</span>
+          </div>
+          <button id="toggleInfo" class="btn-ghost" aria-pressed="false" title="Toggle info (I)">◂ Show info</button>
+          <button id="backBtn" class="btn" title="Reset (R/Esc)">↺ Reset</button>
+        </div>
+      </div>
+
+      <div id="shell" class="shell collapsed">
+        <div class="map-shell">
+          <svg id="map" viewBox="0 0 1000 560" role="img" aria-label="World map"></svg>
+          <div id="tooltip" class="tooltip" aria-hidden="true"></div>
+        </div>
+        <aside id="info" class="info hidden" aria-live="polite">
+          <div class="badge"><span class="k">Selected</span><span id="flag" class="v">—</span></div>
+          <h2 id="name" class="big">—</h2>
+          <div class="muted" id="aka"></div>
+          <div><span class="k">Continent:</span> <span id="continent" class="v">—</span></div>
+          <div><span class="k">Capital:</span> <span id="capital" class="v">—</span></div>
+          <div><span class="k">Population:</span> <span id="pop" class="v">—</span></div>
+          <div><span class="k">ISO3:</span> <span id="iso3" class="v">—</span></div>
+
+          <div class="section">
+            <h3>Country overview</h3>
+            <div id="summary">
+              <div class="skeleton lg"></div>
+              <div class="skeleton"></div>
+              <div class="skeleton" style="width:70%"></div>
+            </div>
+            <div class="small">Source: Wikipedia</div>
+          </div>
+
+          <div class="section">
+            <h3>Culture</h3>
+            <div id="culture">
+              <div class="skeleton lg"></div>
+              <div class="skeleton"></div>
+            </div>
+            <div class="small">If available: “Culture of &lt;Country&gt;” page</div>
+          </div>
+        </aside>
+      </div>
+
+      <p class="note">Click → zoom into continent →  country. Double-click map = instant reset. Press <b>I</b> to show/hide info, <b>R</b> or <b>Esc</b> to reset. Use the search box to jump to a country.</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+    const GEOJSON_URL = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
+    const BOUNDARY_URL = 'https://geojson.xyz/naturalearth-3.3.0/ne_110m_admin_0_boundary_lines_land.geojson';
+
+    const mapEl = d3.select('#map');
+    const shell = document.getElementById('shell');
+    const backBtn = document.getElementById('backBtn');
+    const toggleInfoBtn = document.getElementById('toggleInfo');
+    const title = document.getElementById('title');
+    const info = {
+      wrap: document.getElementById('info'),
+      name: document.getElementById('name'),
+      aka: document.getElementById('aka'),
+      continent: document.getElementById('continent'),
+      capital: document.getElementById('capital'),
+      pop: document.getElementById('pop'),
+      iso3: document.getElementById('iso3'),
+      flag: document.getElementById('flag'),
+      summary: document.getElementById('summary'),
+      culture: document.getElementById('culture')
+    };
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const datalist = document.getElementById('countryList');
+
+    const proj = d3.geoNaturalEarth1().fitExtent([[10,10],[990,550]], {type:'Sphere'});
+    const path = d3.geoPath(proj);
+
+    let features = []; // enriched with normalized continent label
+    let state = 'world';
+    let zoomedContinent = null;
+    let poppedSel = null;
+    let infoVisible = false;
+
+    const COLORS = { 'North America':'#60a5fa', 'South America':'#f59e0b', 'Europe':'#a78bfa', 'Africa':'#22c55e', 'Asia':'#f87171', 'Oceania':'#38bdf8', 'Antarctica':'#94a3b8' };
+
+    function normalizeContinent(p){
+      const allowed = new Set(['Africa','Asia','Europe','North America','South America','Oceania','Antarctica']);
+      const cRaw = (p.CONTINENT||'').trim();
+      const region = (p.REGION_UN||'').trim();
+      const sub = (p.SUBREGION||'').trim();
+      const iso = (p.ISO_A3||'').trim();
+      const overrides = { 'TUR':'Asia','ARM':'Asia','AZE':'Asia','GEO':'Asia','CYP':'Asia','KAZ':'Asia','RUS':'Asia','PNG':'Oceania','IDN':'Asia','AUS':'Oceania','NZL':'Oceania' };
+      if(overrides[iso]) return overrides[iso];
+      if(allowed.has(cRaw)) return cRaw;
+      const byRegion = { 'Africa':'Africa','Americas':'North America','Asia':'Asia','Europe':'Europe','Oceania':'Oceania','Polar':'Antarctica' };
+      if(byRegion[region]){
+        if(region==='Americas'){ if(/South America/i.test(sub)) return 'South America'; return 'North America'; }
+        return byRegion[region];
+      }
+      const lon = p.LONG_X||0, lat = p.LAT_Y||0;
+      if(lat < -60) return 'Antarctica';
+      if(lon>=-170 && lon<=-25){ return /South/i.test(sub)?'South America':'North America'; }
+      if(lon> -25 && lon< 60 && lat>0) return 'Europe';
+      if(lon>= 110 || (lon>=60 && lat>=-10)) return 'Asia';
+      if(lat<0 && lon>-25 && lon<60) return 'Africa';
+      return 'Oceania';
+    }
+
+    function nicePop(n){ if(!n && n!==0) return '—'; return n>1e9? (n/1e9).toFixed(2)+'B' : n>1e6? (n/1e6).toFixed(1)+'M' : n.toLocaleString(); }
+
+    function setInfoVisible(v){
+      infoVisible = v;
+      toggleInfoBtn.setAttribute('aria-pressed', String(v));
+      toggleInfoBtn.textContent = v ? '▸ Hide info' : '◂ Show info';
+      if(v){
+        shell.classList.remove('collapsed');
+        info.wrap.classList.remove('hidden');
+        info.wrap.style.display='grid';
+      } else {
+        shell.classList.add('collapsed');
+        info.wrap.style.display='none';
+      }
+    }
+
+    function reset(instant=false){
+      setInfoVisible(false);
+      if(poppedSel){ poppedSel.classed('popped',false).classed('dimmed',false).attr('transform',null); }
+      mapEl.selectAll('path.country').classed('dimmed',false).classed('continent-dim',false);
+      poppedSel=null;
+      if(instant){ mapEl.attr('viewBox','0 0 1000 560'); }
+      else { mapEl.transition().duration(750).attr('viewBox','0 0 1000 560'); }
+      state='world'; zoomedContinent=null;
+
+      // clear info text
+      info.name.textContent=''; info.aka.textContent=''; info.continent.textContent='';
+      info.capital.textContent=''; info.pop.textContent=''; info.iso3.textContent=''; info.flag.textContent='';
+      info.summary.innerHTML = '';
+      info.culture.innerHTML = '';
+      title.textContent='World — Click a country to zoom into continent';
+    }
+
+    backBtn.addEventListener('click', ()=>reset(false));
+    mapEl.on('dblclick', ()=>reset(true));
+    toggleInfoBtn.addEventListener('click', ()=>setInfoVisible(!infoVisible));
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='i' || e.key==='I'){ setInfoVisible(!infoVisible); }
+      if(e.key==='r' || e.key==='R' || e.key==='Escape'){ reset(e.key!=='Escape'); }
+      if(e.key==='Enter' && document.activeElement===searchInput){ doSearch(); }
+    });
+
+    function zoomToContinent(continent){
+      const contFeatures = features.filter(f=>f.properties._continent===continent);
+      const coll = {type:'FeatureCollection', features: contFeatures};
+      const b = d3.geoPath(proj).bounds(coll);
+      let minX=b[0][0], minY=b[0][1], maxX=b[1][0], maxY=b[1][1];
+      let w = maxX-minX, h = maxY-minY;
+      const margin = 0.10; const dw=w*margin, dh=h*margin; minX-=dw; minY-=dh; w+=2*dw; h+=2*dh;
+      state='zooming'; zoomedContinent=continent;
+      title.textContent=`${continent} — Click a country`;
+      mapEl.selectAll('path.country').classed('continent-dim', d=> d.properties._continent!==continent);
+      return mapEl.transition().duration(750).attr('viewBox',`${minX} ${minY} ${w} ${h}`).end().then(()=>{ state='zoomed'; });
+    }
+
+    function popCountry(d,sel){
+      if(poppedSel){ poppedSel.classed('popped',false).attr('transform',null); }
+      poppedSel=sel; sel.raise().classed('popped',true);
+      mapEl.selectAll('path.country').classed('dimmed',n=>n!==d);
+      // Center in the left 2/5 area
+      const vb=mapEl.attr('viewBox').split(' ').map(Number);
+      const targetX=vb[0]+0.20*vb[2];
+      const targetY=vb[1]+0.50*vb[3];
+      const bbox=sel.node().getBBox();
+      const bx=bbox.x+bbox.width/2, by=bbox.y+bbox.height/2;
+      const scale=1.25, tx=targetX-bx, ty=targetY-by;
+      sel.transition().duration(500).attr('transform',`translate(${tx},${ty}) scale(${scale})`);
+      // Fill info and show panel
+      fillInfo(d);
+      setInfoVisible(true);
+      state='popped';
+      title.textContent=`${d.properties.NAME} —  view`;
+    }
+
+    function onClickCountry(event,d){
+      if(state==='world'){ zoomToContinent(d.properties._continent); return; }
+      if(state==='zoomed'){
+        if(d.properties._continent!==zoomedContinent){ zoomToContinent(d.properties._continent); return; }
+        popCountry(d,d3.select(event.currentTarget)); return;
+      }
+      if(state==='popped'){
+        if(d.properties._continent===zoomedContinent){ popCountry(d,d3.select(event.currentTarget)); }
+        else { reset(true); zoomToContinent(d.properties._continent); }
+      }
+    }
+
+    function textNode(htmlOrText){
+      // Strip tags by parsing and returning plain text safely
+      const tmp = document.createElement('div');
+      tmp.innerHTML = htmlOrText||'';
+      return tmp.textContent || tmp.innerText || '';
+    }
+
+    async function fetchWikiSummary(title){
+      const url = 'https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(title);
+      const r = await fetch(url, {headers:{'Accept':'application/json'}});
+      if(!r.ok) throw new Error('summary fetch failed');
+      const data = await r.json();
+      return {
+        title: data.title,
+        extract: data.extract,
+        url: data.content_urls?.desktop?.page || ('https://en.wikipedia.org/wiki/' + encodeURIComponent(title))
+      };
+    }
+
+    async function fetchWikiCulture(country){
+      const candidates = [
+        `Culture of ${country}`,
+        `Culture of the ${country}`,
+        `${country} culture`,
+        `${country} Culture`
+      ];
+      for(const t of candidates){
+        try{
+          const s = await fetchWikiSummary(t);
+          if(s && s.extract && s.extract.length > 40){
+            return s;
+          }
+        }catch(e){ /* try next */ }
+      }
+      // Fallback: try a section-like blurb from the country page itself
+      try{
+        const s = await fetchWikiSummary(country);
+        return { title: `Culture — ${s.title}`, extract: s.extract, url: s.url };
+      }catch(e){
+        return null;
+      }
+    }
+
+    function showSummaryBlock(node, data){
+      node.innerHTML = '';
+      if(!data){
+        node.innerHTML = '<div class="small">No overview available.</div>';
+        return;
+      }
+      const p = document.createElement('p');
+      p.textContent = textNode(data.extract).slice(0, 600) + (data.extract.length>600?'…':'');
+      const link = document.createElement('a'); link.href = data.url; link.target = '_blank'; link.rel='noopener noreferrer'; link.className='link'; link.textContent='Read more on Wikipedia';
+      node.appendChild(p); node.appendChild(link);
+    }
+
+    async function fillInfoFromWikipedia(countryName){
+      // skeletons while loading
+      info.summary.innerHTML = '<div class="skeleton lg"></div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div>';
+      info.culture.innerHTML = '<div class="skeleton lg"></div><div class="skeleton"></div>';
+      try{
+        const [overview, culture] = await Promise.all([
+          fetchWikiSummary(countryName),
+          fetchWikiCulture(countryName)
+        ]);
+        showSummaryBlock(info.summary, overview);
+        showSummaryBlock(info.culture, culture);
+      }catch(err){
+        info.summary.innerHTML = '<div class="small">Couldn’t load country overview.</div>';
+        info.culture.innerHTML = '<div class="small">Couldn’t load cultural details.</div>';
+      }
+    }
+
+    function fillInfo(d){
+      const p=d.properties||{};
+      info.name.textContent=p.NAME||'Unknown';
+      info.aka.textContent=p.NAME_LONG&&p.NAME_LONG!==p.NAME? p.NAME_LONG:'';
+      info.continent.textContent=p._continent||p.CONTINENT||'—';
+      info.capital.textContent=p.CAPITAL||'—';
+      info.pop.textContent=nicePop(p.POP_EST);
+      info.iso3.textContent=p.ISO_A3||'—';
+      info.flag.textContent='★';
+      // Start fetching overview + culture
+      fillInfoFromWikipedia(p.NAME || p.NAME_LONG || p.ISO_A3 || '');
+    }
+
+    // --- Search helpers ---
+    function canonical(s){ return (s||'').toString().trim().toLowerCase(); }
+
+    async function focusCountryByFeature(f){
+      if(!f) return;
+      if(state==='world' || f.properties._continent!==zoomedContinent){ await zoomToContinent(f.properties._continent); }
+      const sel = mapEl.selectAll('path.country').filter(d => d === f);
+      if(!sel.empty()){ popCountry(f, sel); }
+    }
+
+    function findFeatureByQuery(q){
+      const want = canonical(q);
+      if(!want) return null;
+      const exact = features.find(f => {
+        const p = f.properties||{};
+        return canonical(p.NAME)===want || canonical(p.NAME_LONG)===want || canonical(p.ISO_A3)===want;
+      });
+      if(exact) return exact;
+      return features.find(f => {
+        const p = f.properties||{};
+        return canonical(p.NAME).includes(want) || canonical(p.NAME_LONG).includes(want) || canonical(p.ISO_A3).includes(want);
+      });
+    }
+
+    async function doSearch(){
+      const q = searchInput.value;
+      const f = findFeatureByQuery(q);
+      if(!f){
+        title.textContent = `No match for "${q}". Try full country name or ISO3 (e.g., USA, FRA, BRA).`;
+        return;
+      }
+      await focusCountryByFeature(f);
+      title.textContent = `${f.properties.NAME} —  view`;
+    }
+
+    searchBtn.addEventListener('click', doSearch);
+    searchInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ doSearch(); } });
+
+    // Render countries
+    fetch(GEOJSON_URL).then(r=>r.json()).then(geo=>{
+      features = geo.features.map(f=>{ f.properties._continent = normalizeContinent(f.properties||{}); return f; });
+      // Build datalist options
+      const frag = document.createDocumentFragment();
+      features.forEach(f => {
+        const p = f.properties||{};
+        const opt = document.createElement('option');
+        opt.value = p.NAME;
+        opt.label = (p.NAME_LONG && p.NAME_LONG!==p.NAME) ? `${p.NAME} — ${p.NAME_LONG} (${p.ISO_A3})` : `${p.NAME} (${p.ISO_A3})`;
+        frag.appendChild(opt);
+      });
+      datalist.appendChild(frag);
+      // Countries
+      mapEl.append('g').selectAll('path').data(features).enter().append('path')
+        .attr('class','country')
+        .attr('d',d=>path(d))
+        .attr('fill',d=>COLORS[d.properties._continent]||'#666')
+        .on('click',onClickCountry);
+    });
+
+    // Draw boundary lines overlay
+    fetch(BOUNDARY_URL).then(r=>r.json()).then(lines=>{
+      mapEl.append('g').attr('class','borders')
+        .selectAll('path').data(lines.features).enter().append('path')
+        .attr('d',d=>path(d));
+    }).catch(()=>{});
+  </script>
+</body>
+</html>
